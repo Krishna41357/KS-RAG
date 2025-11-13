@@ -1,0 +1,21 @@
+# Ignore Python virtual environments
+.venv/
+server/.venv/
+
+# Byte-compiled / cache files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environment variables
+.env
+
+# IDE and OS files
+.vscode/
+.idea/
+.DS_Store
+
+# Build / dependency folders
+node_modules/
+dist/
+build/
