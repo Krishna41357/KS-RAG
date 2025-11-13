@@ -4,7 +4,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Send, FileText, Loader2, MessageSquare, Trash2, Paperclip, X, LogOut, User, History, Menu, Plus } from 'lucide-react';
 import { useAuth } from './AuthContext';
 
-const API_BASE_URL = 'http://localhost:8000';
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000';
 
 type Source = {
   pdf_name: string;
