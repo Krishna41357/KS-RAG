@@ -6,7 +6,7 @@ from pymongo import MongoClient
 
 from models.user import (
     UserCreate, UserLogin, UserResponse, Token, 
-    UserInDB, UserUpdate, QueryHistory
+    UserUpdate
 )
 from controllers.auth import (
     get_password_hash, verify_password, 
@@ -60,8 +60,7 @@ async def register_user(user: UserCreate):
         "is_active": True,
         "is_verified": False,
         "created_at": datetime.utcnow(),
-        "updated_at": datetime.utcnow(),
-        "query_history": []
+        "updated_at": datetime.utcnow()
     }
     
     # Insert into database
@@ -221,47 +220,3 @@ async def update_user(
         is_verified=result["is_verified"],
         created_at=result["created_at"]
     )
-
-
-@router.get("/me/history")
-async def get_query_history(current_user = Depends(get_current_user)):
-    """
-    Get user's query history.
-    Returns list of all queries made by the authenticated user.
-    """
-    user = users_collection.find_one(
-        {"email": current_user.email},
-        {"query_history": 1}
-    )
-    
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
-        )
-    
-    history = user.get("query_history", [])
-    
-    return {
-        "total_queries": len(history),
-        "history": history
-    }
-
-
-@router.delete("/me/history")
-async def clear_query_history(current_user = Depends(get_current_user)):
-    """
-    Clear user's entire query history.
-    """
-    result = users_collection.update_one(
-        {"email": current_user.email},
-        {"$set": {"query_history": []}}
-    )
-    
-    if result.modified_count == 0:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
-        )
-    
-    return {"message": "Query history cleared successfully"}

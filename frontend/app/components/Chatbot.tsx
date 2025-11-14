@@ -7,23 +7,26 @@ import { useAuth } from './AuthContext';
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000';
 
 type Source = {
-  pdf_name: string;
-  page: number;
-  score: number;
-  snippet: string;
+  title: string;
+  content: string;
+  url?: string;
+  score?: number;
 };
 
 type Message = {
-  type: 'user' | 'assistant' | 'system' | 'error';
+  role: 'user' | 'assistant';
   content: string;
   sources?: Source[];
+  timestamp?: string;
 };
 
-type QueryHistory = {
-  query: string;
-  answer: string;
-  timestamp: string;
-  sources_count: number;
+type Chat = {
+  id: string;
+  title: string;
+  message_count: number;
+  last_message?: string;
+  created_at: string;
+  updated_at: string;
 };
 
 export default function Chatbot() {
@@ -33,9 +36,11 @@ export default function Chatbot() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputMessage, setInputMessage] = useState<string>('');
   const [querying, setQuerying] = useState<boolean>(false);
-  const [history, setHistory] = useState<QueryHistory[]>([]);
-  const [loadingHistory, setLoadingHistory] = useState<boolean>(false);
+  const [chats, setChats] = useState<Chat[]>([]);
+  const [currentChatId, setCurrentChatId] = useState<string | null>(null);
+  const [loadingChats, setLoadingChats] = useState<boolean>(false);
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(true);
+  const [systemMessage, setSystemMessage] = useState<string>('');
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -48,17 +53,22 @@ export default function Chatbot() {
   }, [messages]);
 
   useEffect(() => {
-    if (token) {
-      fetchHistory();
+    if (token && user) {
+      fetchChats();
     }
-  }, [token]);
+  }, [token, user]);
 
-  const fetchHistory = async () => {
+  const showSystemMessage = (msg: string, type: 'success' | 'error' | 'info' = 'info') => {
+    setSystemMessage(msg);
+    setTimeout(() => setSystemMessage(''), 5000);
+  };
+
+  const fetchChats = async () => {
     if (!token) return;
     
-    setLoadingHistory(true);
+    setLoadingChats(true);
     try {
-      const response = await fetch(`${API_BASE_URL}/users/me/history`, {
+      const response = await fetch(`${API_BASE_URL}/chats`, {
         headers: {
           'Authorization': `Bearer ${token}`,
         },
@@ -66,31 +76,103 @@ export default function Chatbot() {
 
       if (response.ok) {
         const data = await response.json();
-        setHistory(data.history || []);
+        setChats(data);
       }
     } catch (error) {
-      console.error('Error fetching history:', error);
+      console.error('Error fetching chats:', error);
     } finally {
-      setLoadingHistory(false);
+      setLoadingChats(false);
+    }
+  };
+
+  const createNewChat = async () => {
+    if (!token) {
+      showSystemMessage('Please login to create chats', 'error');
+      return;
+    }
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/chats`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ title: 'New Chat' }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setCurrentChatId(data.chat_id);
+        setMessages([]);
+        await fetchChats();
+        showSystemMessage('New chat created!', 'success');
+      }
+    } catch (error) {
+      console.error('Error creating chat:', error);
+      showSystemMessage('Failed to create chat', 'error');
+    }
+  };
+
+  const loadChat = async (chatId: string) => {
+    if (!token) return;
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/chats/${chatId}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setCurrentChatId(chatId);
+        setMessages(data.messages || []);
+      }
+    } catch (error) {
+      console.error('Error loading chat:', error);
+      showSystemMessage('Failed to load chat', 'error');
+    }
+  };
+
+  const deleteChat = async (chatId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!token) return;
+
+    if (!confirm('Are you sure you want to delete this chat?')) return;
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/chats/${chatId}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+
+      if (response.ok || response.status === 204) {
+        if (currentChatId === chatId) {
+          setCurrentChatId(null);
+          setMessages([]);
+        }
+        await fetchChats();
+        showSystemMessage('Chat deleted', 'success');
+      }
+    } catch (error) {
+      console.error('Error deleting chat:', error);
+      showSystemMessage('Failed to delete chat', 'error');
     }
   };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFiles = Array.from(e.target.files || []);
     if (selectedFiles.length > 4) {
-      setMessages(prev => [...prev, { 
-        type: 'system', 
-        content: '⚠️ Maximum 4 PDF files allowed' 
-      }]);
+      showSystemMessage('Maximum 4 PDF files allowed', 'error');
       return;
     }
     
     const pdfFiles = selectedFiles.filter(f => f.name.toLowerCase().endsWith('.pdf'));
     if (pdfFiles.length !== selectedFiles.length) {
-      setMessages(prev => [...prev, { 
-        type: 'system', 
-        content: '⚠️ Only PDF files are supported' 
-      }]);
+      showSystemMessage('Only PDF files are supported', 'error');
       return;
     }
     
@@ -105,10 +187,7 @@ export default function Chatbot() {
     if (files.length === 0) return;
 
     setUploading(true);
-    setMessages(prev => [...prev, { 
-      type: 'system', 
-      content: `📤 Uploading ${files.length} file(s)...` 
-    }]);
+    showSystemMessage(`Uploading ${files.length} file(s)...`, 'info');
 
     const formData = new FormData();
     files.forEach(file => {
@@ -127,19 +206,13 @@ export default function Chatbot() {
       }
 
       const data = await response.json();
-      setMessages(prev => [...prev, { 
-        type: 'system', 
-        content: `✅ Successfully indexed ${data.indexed_files} files (${data.indexed_chunks} chunks)` 
-      }]);
+      showSystemMessage(`Successfully indexed ${data.indexed_files} files (${data.indexed_chunks} chunks)`, 'success');
       setFiles([]);
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
       }
     } catch (error: any) {
-      setMessages(prev => [...prev, { 
-        type: 'system', 
-        content: `❌ Error: ${error.message}` 
-      }]);
+      showSystemMessage(`Upload error: ${error.message}`, 'error');
     } finally {
       setUploading(false);
     }
@@ -148,48 +221,80 @@ export default function Chatbot() {
   const handleQuery = async () => {
     if (!inputMessage.trim() || querying) return;
 
+    // If user is logged in but no chat is selected, create one
+    if (token && !currentChatId) {
+      await createNewChat();
+      // Wait a bit for chat to be created
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
+
     const userMessage = inputMessage.trim();
     setInputMessage('');
     
-    setMessages(prev => [...prev, { type: 'user', content: userMessage }]);
+    // Add user message to UI immediately
+    setMessages(prev => [...prev, { role: 'user', content: userMessage }]);
     setQuerying(true);
 
     try {
-      const endpoint = token ? `${API_BASE_URL}/query/auth` : `${API_BASE_URL}/query`;
-      const headers: HeadersInit = {
-        'Content-Type': 'application/json',
-      };
-      
-      if (token) {
-        headers['Authorization'] = `Bearer ${token}`;
-      }
+      // If logged in and have a chat, use chat endpoint
+      if (token && currentChatId) {
+        const response = await fetch(`${API_BASE_URL}/chats/${currentChatId}/messages`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ content: userMessage }),
+        });
 
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ question: userMessage }),
-      });
+        if (!response.ok) {
+          const error = await response.json();
+          throw new Error(error.detail || 'Query failed');
+        }
 
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.detail || 'Query failed');
-      }
+        const data = await response.json();
+        
+        // Update the last message with assistant response
+        setMessages(prev => [
+          ...prev,
+          {
+            role: 'assistant',
+            content: data.assistant_message.content,
+            sources: data.assistant_message.sources || []
+          }
+        ]);
 
-      const data = await response.json();
-      setMessages(prev => [...prev, { 
-        type: 'assistant', 
-        content: data.answer,
-        sources: data.sources 
-      }]);
+        // Refresh chat list to update title and message count
+        await fetchChats();
+      } else {
+        // Fallback to public query endpoint for non-logged-in users
+        const response = await fetch(`${API_BASE_URL}/query`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ question: userMessage }),
+        });
 
-      if (data.saved_to_history) {
-        fetchHistory();
+        if (!response.ok) {
+          const error = await response.json();
+          throw new Error(error.detail || 'Query failed');
+        }
+
+        const data = await response.json();
+        setMessages(prev => [
+          ...prev,
+          {
+            role: 'assistant',
+            content: data.answer,
+            sources: data.sources || []
+          }
+        ]);
       }
     } catch (error: any) {
-      setMessages(prev => [...prev, { 
-        type: 'error', 
-        content: `Error: ${error.message}` 
-      }]);
+      showSystemMessage(`Error: ${error.message}`, 'error');
+      // Remove the user message that failed
+      setMessages(prev => prev.slice(0, -1));
     } finally {
       setQuerying(false);
     }
@@ -208,11 +313,7 @@ export default function Chatbot() {
 
   const clearChat = () => {
     setMessages([]);
-  };
-
-  const startNewChat = () => {
-    setMessages([]);
-    setFiles([]);
+    setCurrentChatId(null);
   };
 
   return (
@@ -222,44 +323,59 @@ export default function Chatbot() {
         {/* Sidebar Header */}
         <div className="p-4 border-b border-gray-800">
           <button
-            onClick={startNewChat}
-            className="w-full bg-gray-800 hover:bg-gray-700 text-white px-4 py-3 rounded-lg transition-colors flex items-center justify-center gap-2 font-medium"
+            onClick={createNewChat}
+            disabled={!token}
+            className="w-full bg-red-600 hover:bg-red-700 disabled:bg-gray-700 disabled:text-gray-500 text-white px-4 py-3 rounded-lg transition-colors flex items-center justify-center gap-2 font-medium"
           >
             <Plus className="w-5 h-5" />
             New Chat
           </button>
         </div>
 
-        {/* History List */}
+        {/* Chats List */}
         <div className="flex-1 overflow-y-auto p-3 space-y-2">
           <div className="text-xs font-semibold text-gray-400 px-3 py-2 flex items-center gap-2">
             <History className="w-4 h-4" />
-            CHAT HISTORY
+            YOUR CHATS
           </div>
           
-          {loadingHistory ? (
+          {!token ? (
+            <div className="text-center text-gray-500 py-8 px-4">
+              <User className="w-12 h-12 mx-auto mb-2 opacity-30" />
+              <p className="text-sm">Login to save chats</p>
+            </div>
+          ) : loadingChats ? (
             <div className="flex items-center justify-center py-8">
               <Loader2 className="w-6 h-6 animate-spin text-gray-400" />
             </div>
-          ) : history.length === 0 ? (
+          ) : chats.length === 0 ? (
             <div className="text-center text-gray-500 py-8 px-4">
-              <History className="w-12 h-12 mx-auto mb-2 opacity-30" />
-              <p className="text-sm">No history yet</p>
+              <MessageSquare className="w-12 h-12 mx-auto mb-2 opacity-30" />
+              <p className="text-sm">No chats yet</p>
             </div>
           ) : (
-            history.slice().reverse().map((item, idx) => (
+            chats.map((chat) => (
               <div
-                key={idx}
-                className="bg-gray-800 hover:bg-gray-700 rounded-lg p-3 cursor-pointer transition-colors"
+                key={chat.id}
+                onClick={() => loadChat(chat.id)}
+                className={`${
+                  currentChatId === chat.id ? 'bg-red-900 border-red-700' : 'bg-gray-800 hover:bg-gray-700'
+                } rounded-lg p-3 cursor-pointer transition-colors border border-gray-700 group relative`}
               >
-                <p className="text-sm text-white font-medium line-clamp-1 mb-1">{item.query}</p>
+                <p className="text-sm text-white font-medium line-clamp-1 mb-1 pr-8">{chat.title}</p>
                 <div className="flex items-center justify-between text-xs text-gray-400">
                   <span className="flex items-center gap-1">
-                    <FileText className="w-3 h-3" />
-                    {item.sources_count}
+                    <MessageSquare className="w-3 h-3" />
+                    {chat.message_count} messages
                   </span>
-                  <span>{new Date(item.timestamp).toLocaleDateString()}</span>
+                  <span>{new Date(chat.updated_at).toLocaleDateString()}</span>
                 </div>
+                <button
+                  onClick={(e) => deleteChat(chat.id, e)}
+                  className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 text-red-400 hover:text-red-300 transition-opacity"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
               </div>
             ))
           )}
@@ -303,7 +419,9 @@ export default function Chatbot() {
             </button>
             <div className="flex items-center gap-2">
               <MessageSquare className="w-6 h-6 text-red-500" />
-              <h1 className="text-xl font-bold text-white">RAG Chatbot</h1>
+              <h1 className="text-xl font-bold text-white">
+                {currentChatId && chats.find(c => c.id === currentChatId)?.title || 'RAG Chatbot'}
+              </h1>
             </div>
           </div>
           {messages.length > 0 && (
@@ -316,6 +434,15 @@ export default function Chatbot() {
             </button>
           )}
         </div>
+
+        {/* System Message Toast */}
+        {systemMessage && (
+          <div className="bg-gray-900 border-b border-gray-700 px-4 py-2">
+            <div className="max-w-4xl mx-auto">
+              <p className="text-sm text-gray-300">{systemMessage}</p>
+            </div>
+          </div>
+        )}
 
         {/* Messages Area */}
         <div className="flex-1 overflow-y-auto">
@@ -338,20 +465,22 @@ export default function Chatbot() {
                     <span className="text-red-500 font-bold">3.</span>
                     <span>Ask questions about your documents</span>
                   </p>
+                  {!token && (
+                    <p className="flex items-start gap-2 text-yellow-400 mt-4 pt-4 border-t border-gray-700">
+                      <span className="font-bold">💡</span>
+                      <span>Login to save your chat conversations!</span>
+                    </p>
+                  )}
                 </div>
               </div>
             </div>
           ) : (
             <div className="max-w-4xl mx-auto px-4 py-6 space-y-6">
               {messages.map((msg, idx) => (
-                <div key={idx} className={`flex ${msg.type === 'user' ? 'justify-end' : 'justify-start'}`}>
+                <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                   <div className={`max-w-[85%] rounded-2xl px-5 py-4 ${
-                    msg.type === 'user' 
+                    msg.role === 'user' 
                       ? 'bg-red-600 text-white' 
-                      : msg.type === 'error'
-                      ? 'bg-red-900 text-red-200 border border-red-700'
-                      : msg.type === 'system'
-                      ? 'bg-gray-700 text-gray-200 border border-gray-600'
                       : 'bg-gray-700 text-gray-100 border border-gray-600'
                   }`}>
                     <p className="whitespace-pre-wrap leading-relaxed">{msg.content}</p>
@@ -365,13 +494,15 @@ export default function Chatbot() {
                               <div className="flex items-center gap-2 mb-2">
                                 <FileText className="w-3 h-3 text-red-400" />
                                 <span className="font-medium text-gray-200">
-                                  {source.pdf_name} - Page {source.page}
+                                  {source.title}
                                 </span>
-                                <span className="ml-auto text-red-400 font-bold">
-                                  {(source.score * 100).toFixed(0)}%
-                                </span>
+                                {source.score && (
+                                  <span className="ml-auto text-red-400 font-bold">
+                                    {(source.score * 100).toFixed(0)}%
+                                  </span>
+                                )}
                               </div>
-                              <p className="text-gray-400 line-clamp-2">{source.snippet}</p>
+                              <p className="text-gray-400 line-clamp-2">{source.content}</p>
                             </div>
                           ))}
                         </div>
@@ -457,7 +588,9 @@ export default function Chatbot() {
               </button>
             </div>
             <p className="text-xs text-gray-500 text-center mt-2">
-              {user ? `Logged in as ${user.username} • Queries are saved to history` : 'Not logged in • Queries are not saved'}
+              {user 
+                ? `Logged in as ${user.username} • Chat history is saved` 
+                : 'Not logged in • Messages are not saved'}
             </p>
           </div>
         </div>
