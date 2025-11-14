@@ -5,20 +5,19 @@ from fastapi import FastAPI, UploadFile, File, HTTPException, Depends
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from pymongo import MongoClient
-from datetime import datetime
 
 from vectorstore import index_documents
 from answer_generator import answer_query
 from controllers.auth import get_current_user
 from routes.users import router as users_router
+from routes.chats import router as chat_router
 
 load_dotenv()
 
 app = FastAPI(
     title="RAG Chatbot API",
-    description="Upload PDFs and query them using RAG (Retrieval-Augmented Generation)",
-    version="1.0.0"
+    description="Upload PDFs and query them using RAG (Retrieval-Augmented Generation) with chat history",
+    version="2.0.0"
 )
 
 # CORS middleware
@@ -30,18 +29,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include user routes
+# Include routers
 app.include_router(users_router)
+app.include_router(chat_router)
 
 # Upload directory
 UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
-
-# MongoDB setup for user history
-mongo_uri = os.getenv("MONGO_URI")
-mongo_client = MongoClient(mongo_uri)
-db = mongo_client["rag_database"]
-users_collection = db["users"]
 
 
 class QueryRequest(BaseModel):
@@ -53,16 +47,32 @@ def read_root():
     """Root endpoint - API information."""
     return {
         "message": "RAG Chatbot API is running",
-        "version": "1.0.0",
+        "version": "2.0.0",
+        "features": [
+            "PDF upload and vector embeddings",
+            "Semantic search with Cohere",
+            "Answer generation with Groq LLM",
+            "User authentication with JWT",
+            "Chat history and conversations"
+        ],
         "endpoints": {
-            "POST /upload": "Upload PDFs (max 4) and create embeddings",
-            "POST /query": "Query PDFs (public, no auth required)",
-            "POST /query/auth": "Query PDFs (authenticated, saves history)",
-            "POST /users/register": "Register a new user",
-            "POST /users/login": "Login and get JWT token",
-            "GET /users/me": "Get current user info (requires auth)",
-            "GET /users/me/history": "Get query history (requires auth)",
-            "GET /health": "Health check"
+            "Documents": {
+                "POST /upload": "Upload PDFs (max 4) and create embeddings",
+                "POST /query": "Query PDFs (public, no auth required)"
+            },
+            "Authentication": {
+                "POST /users/register": "Register a new user",
+                "POST /users/login": "Login and get JWT token",
+                "GET /users/me": "Get current user info (requires auth)"
+            },
+            "Chats": {
+                "POST /chats": "Create a new chat conversation",
+                "GET /chats": "Get all user's chats",
+                "GET /chats/{chat_id}": "Get specific chat with messages",
+                "POST /chats/{chat_id}/messages": "Add message to chat and get response",
+                "PATCH /chats/{chat_id}": "Update chat (title, archive)",
+                "DELETE /chats/{chat_id}": "Delete a chat"
+            }
         }
     }
 
@@ -86,6 +96,9 @@ async def upload_pdfs(files: List[UploadFile] = File(...)):
     2. Extract text and create chunks
     3. Generate vector embeddings using Cohere
     4. Store embeddings in MongoDB
+    
+    Note: This replaces existing embeddings. For production, you might want
+    to implement incremental updates or separate collections per user.
     """
     if len(files) > 4:
         raise HTTPException(status_code=400, detail="Maximum 4 PDF files allowed.")
@@ -123,6 +136,9 @@ def query_docs(req: QueryRequest):
     """
     Query the stored embeddings (public endpoint - no authentication required).
     
+    For one-off queries without chat history.
+    Use POST /chats for persistent conversations.
+    
     Request body:
     {
         "question": "Your question here"
@@ -150,57 +166,6 @@ def query_docs(req: QueryRequest):
         raise HTTPException(
             status_code=500, 
             detail=f"Error during query: {str(e)}"
-        )
-
-
-@app.post("/query/auth")
-async def query_docs_authenticated(
-    req: QueryRequest,
-    current_user = Depends(get_current_user)
-):
-    """
-    Query with authentication - saves query to user history.
-    
-    Requires: Authorization header with Bearer token
-    
-    Request body:
-    {
-        "question": "Your question here"
-    }
-    
-    Response includes user email and saves query to history.
-    """
-    question = req.question.strip()
-    if not question:
-        raise HTTPException(status_code=400, detail="Question cannot be empty.")
-
-    try:
-        answer, sources = answer_query(question)
-        
-        # Save to user history
-        users_collection.update_one(
-            {"email": current_user.email},
-            {"$push": {
-                "query_history": {
-                    "query": question,
-                    "answer": answer,
-                    "timestamp": datetime.utcnow(),
-                    "sources_count": len(sources)
-                }
-            }}
-        )
-        
-        return JSONResponse({
-            "answer": answer,
-            "sources": sources,
-            "question": question,
-            "user": current_user.email,
-            "saved_to_history": True
-        })
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Error processing query: {str(e)}"
         )
 
 

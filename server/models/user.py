@@ -1,24 +1,31 @@
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, ConfigDict
 from typing import Optional, List
 from datetime import datetime
 from bson import ObjectId
 
 
-class PyObjectId(ObjectId):
-    """Custom ObjectId type for Pydantic."""
+class PyObjectId(str):
+    """Custom type for MongoDB ObjectId that works with Pydantic v2"""
+    
     @classmethod
-    def __get_validators__(cls):
-        yield cls.validate
-
-    @classmethod
-    def validate(cls, v):
-        if not ObjectId.is_valid(v):
-            raise ValueError("Invalid ObjectId")
-        return ObjectId(v)
-
-    @classmethod
-    def __modify_schema__(cls, field_schema):
-        field_schema.update(type="string")
+    def __get_pydantic_core_schema__(cls, source_type, handler):
+        from pydantic_core import core_schema
+        
+        def validate_object_id(value):
+            if isinstance(value, ObjectId):
+                return str(value)
+            if isinstance(value, str):
+                if ObjectId.is_valid(value):
+                    return value
+                raise ValueError("Invalid ObjectId")
+            raise ValueError("Invalid ObjectId type")
+        
+        return core_schema.with_info_plain_validator_function(
+            validate_object_id,
+            serialization=core_schema.plain_serializer_function_ser_schema(
+                lambda x: str(x)
+            )
+        )
 
 
 class UserBase(BaseModel):
@@ -56,13 +63,14 @@ class UserInDB(UserBase):
     updated_at: datetime = Field(default_factory=datetime.utcnow)
     query_history: List[dict] = []
     
-    class Config:
-        populate_by_name = True
-        arbitrary_types_allowed = True
-        json_encoders = {
+    model_config = ConfigDict(
+        populate_by_name=True,
+        arbitrary_types_allowed=True,
+        json_encoders={
             ObjectId: str,
             datetime: lambda v: v.isoformat()
         }
+    )
 
 
 class UserResponse(BaseModel):
@@ -75,8 +83,9 @@ class UserResponse(BaseModel):
     is_verified: bool
     created_at: datetime
     
-    class Config:
-        populate_by_name = True
+    model_config = ConfigDict(
+        populate_by_name=True
+    )
 
 
 class Token(BaseModel):
