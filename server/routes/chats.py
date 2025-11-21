@@ -1,4 +1,4 @@
-# routes/chat.py
+# routes/chats.py
 from typing import List, Optional
 from fastapi import APIRouter, HTTPException, status, Depends, Query
 from pydantic import BaseModel, Field
@@ -53,10 +53,21 @@ async def create_new_chat(
         "chat_id": "..."
     }
     """
+    # Validate user_id exists in token
+    if not current_user.user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token: user_id not found. Please log in again."
+        )
+    
     try:
         title = chat.title or "New Chat"
+        user_id = str(current_user.user_id)  # Ensure it's a string
+        
+        print(f"DEBUG create_new_chat: user_id={user_id}, title={title}")
+        
         chat_id = create_chat(
-            user_id=current_user.user_id,
+            user_id=user_id,
             title=title
         )
         
@@ -66,6 +77,7 @@ async def create_new_chat(
             "message": "Chat created successfully"
         }
     except Exception as e:
+        print(f"ERROR create_new_chat: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error creating chat: {str(e)}"
@@ -85,14 +97,26 @@ async def list_chats(
     - skip: Number of chats to skip (default: 0)
     - limit: Maximum number of chats to return (default: 50, max: 100)
     """
+    # Validate user_id exists in token
+    if not current_user.user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token: user_id not found. Please log in again."
+        )
+    
     try:
+        user_id = str(current_user.user_id)  # Ensure it's a string
+        
+        print(f"DEBUG list_chats: user_id={user_id}, skip={skip}, limit={limit}")
+        
         chats = get_user_chats(
-            user_id=current_user.user_id,
+            user_id=user_id,
             skip=skip,
             limit=limit
         )
         return chats
     except Exception as e:
+        print(f"ERROR list_chats: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error fetching chats: {str(e)}"
@@ -107,7 +131,18 @@ async def get_chat(
     """
     Get a specific chat with all messages.
     """
-    chat = get_chat_by_id(chat_id=chat_id, user_id=current_user.user_id)
+    # Validate user_id exists in token
+    if not current_user.user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token: user_id not found. Please log in again."
+        )
+    
+    user_id = str(current_user.user_id)  # Ensure it's a string
+    
+    print(f"DEBUG get_chat route: chat_id={chat_id}, user_id={user_id}")
+    
+    chat = get_chat_by_id(chat_id=chat_id, user_id=user_id)
     
     if not chat:
         raise HTTPException(
@@ -138,8 +173,19 @@ async def add_message(
         "assistant_message": {...}
     }
     """
+    # Validate user_id exists in token
+    if not current_user.user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token: user_id not found. Please log in again."
+        )
+    
+    user_id = str(current_user.user_id)  # Ensure it's a string
+    
+    print(f"DEBUG add_message: chat_id={chat_id}, user_id={user_id}")
+    
     # Verify chat exists and belongs to user
-    chat = get_chat_by_id(chat_id=chat_id, user_id=current_user.user_id)
+    chat = get_chat_by_id(chat_id=chat_id, user_id=user_id)
     if not chat:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -149,7 +195,7 @@ async def add_message(
     # Add user message
     user_message_added = add_message_to_chat(
         chat_id=chat_id,
-        user_id=current_user.user_id,
+        user_id=user_id,
         role="user",
         content=message.content
     )
@@ -165,7 +211,7 @@ async def add_message(
         title = generate_chat_title(message.content)
         update_chat_title(
             chat_id=chat_id,
-            user_id=current_user.user_id,
+            user_id=user_id,
             title=title
         )
     
@@ -173,6 +219,7 @@ async def add_message(
     try:
         answer, sources = answer_query(message.content)
     except Exception as e:
+        print(f"ERROR generating answer: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error generating answer: {str(e)}"
@@ -181,7 +228,7 @@ async def add_message(
     # Add assistant message with sources
     assistant_message_added = add_message_to_chat(
         chat_id=chat_id,
-        user_id=current_user.user_id,
+        user_id=user_id,
         role="assistant",
         content=answer,
         sources=sources
@@ -220,8 +267,19 @@ async def update_chat(
         "title": "New Title"
     }
     """
+    # Validate user_id exists in token
+    if not current_user.user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token: user_id not found. Please log in again."
+        )
+    
+    user_id = str(current_user.user_id)  # Ensure it's a string
+    
+    print(f"DEBUG update_chat: chat_id={chat_id}, user_id={user_id}")
+    
     # Verify chat exists and belongs to user
-    chat = get_chat_by_id(chat_id=chat_id, user_id=current_user.user_id)
+    chat = get_chat_by_id(chat_id=chat_id, user_id=user_id)
     if not chat:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -230,7 +288,7 @@ async def update_chat(
     
     success = update_chat_title(
         chat_id=chat_id,
-        user_id=current_user.user_id,
+        user_id=user_id,
         title=chat_update.title
     )
     
@@ -254,9 +312,20 @@ async def delete_chat_endpoint(
     """
     Delete a chat permanently.
     """
+    # Validate user_id exists in token
+    if not current_user.user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token: user_id not found. Please log in again."
+        )
+    
+    user_id = str(current_user.user_id)  # Ensure it's a string
+    
+    print(f"DEBUG delete_chat: chat_id={chat_id}, user_id={user_id}")
+    
     success = delete_chat(
         chat_id=chat_id,
-        user_id=current_user.user_id
+        user_id=user_id
     )
     
     if not success:
@@ -266,3 +335,16 @@ async def delete_chat_endpoint(
         )
     
     return None
+
+
+# DEBUG ENDPOINT - Remove in production
+@router.get("/debug/token-info")
+async def debug_token_info(current_user=Depends(get_current_user)):
+    """Debug endpoint to check token contents"""
+    return {
+        "email": current_user.email,
+        "user_id": current_user.user_id,
+        "user_id_type": type(current_user.user_id).__name__ if current_user.user_id else "None",
+        "user_id_is_none": current_user.user_id is None,
+        "user_id_value": str(current_user.user_id) if current_user.user_id else "NULL"
+    }

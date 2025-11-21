@@ -65,6 +65,9 @@ async def register_user(user: UserCreate):
     
     # Insert into database
     result = users_collection.insert_one(user_dict)
+    user_id = str(result.inserted_id)
+    
+    print(f"DEBUG register_user: Created user with ID={user_id}")
     
     # Get created user
     created_user = users_collection.find_one({"_id": result.inserted_id})
@@ -119,12 +122,23 @@ async def login(user_credentials: UserLogin):
             detail="Account is inactive"
         )
     
-    # Create access token
+    # ⭐ IMPORTANT: Ensure user_id is always a string
+    user_id = str(user["_id"])
+    user_email = user["email"]
+    
+    print(f"DEBUG login: user_id={user_id}, email={user_email}")
+    
+    # Create access token with user_id as string
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
-        data={"sub": user["email"], "user_id": str(user["_id"])},
+        data={
+            "sub": user_email,
+            "user_id": user_id  # This is now guaranteed to be a string
+        },
         expires_delta=access_token_expires
     )
+    
+    print(f"DEBUG login: Token created successfully for user_id={user_id}")
     
     return {"access_token": access_token, "token_type": "bearer"}
 
@@ -135,6 +149,13 @@ async def get_current_user_info(current_user = Depends(get_current_user)):
     Get current logged-in user information.
     Requires: Authorization header with Bearer token
     """
+    # Validate user_id exists
+    if not current_user.user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token: user_id not found"
+        )
+    
     user = users_collection.find_one({"email": current_user.email})
     
     if not user:
@@ -169,6 +190,13 @@ async def update_user(
         "email": "newemail@example.com"
     }
     """
+    # Validate user_id exists
+    if not current_user.user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token: user_id not found"
+        )
+    
     update_data = user_update.dict(exclude_unset=True)
     
     if not update_data:
@@ -180,7 +208,7 @@ async def update_user(
     # Check if username is already taken
     if "username" in update_data:
         existing_user = users_collection.find_one({"username": update_data["username"]})
-        if existing_user and str(existing_user["_id"]) != current_user.user_id:
+        if existing_user and str(existing_user["_id"]) != str(current_user.user_id):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Username already taken"
@@ -189,7 +217,7 @@ async def update_user(
     # Check if email is already taken
     if "email" in update_data:
         existing_user = users_collection.find_one({"email": update_data["email"]})
-        if existing_user and str(existing_user["_id"]) != current_user.user_id:
+        if existing_user and str(existing_user["_id"]) != str(current_user.user_id):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Email already registered"
@@ -220,3 +248,16 @@ async def update_user(
         is_verified=result["is_verified"],
         created_at=result["created_at"]
     )
+
+
+# ⭐ DEBUG ENDPOINT - Remove in production
+@router.get("/debug/token")
+async def debug_token(current_user = Depends(get_current_user)):
+    """Debug endpoint to check token contents"""
+    return {
+        "email": current_user.email,
+        "user_id": current_user.user_id,
+        "user_id_type": type(current_user.user_id).__name__ if current_user.user_id else "None",
+        "user_id_is_none": current_user.user_id is None,
+        "user_id_value": str(current_user.user_id) if current_user.user_id else "NULL"
+    }

@@ -42,6 +42,13 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
         expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     
     to_encode.update({"exp": expire})
+    
+    # ⭐ Ensure user_id is string if present
+    if "user_id" in to_encode:
+        to_encode["user_id"] = str(to_encode["user_id"])
+    
+    print(f"DEBUG create_access_token: Creating token with data: {to_encode}")
+    
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
 
@@ -53,12 +60,23 @@ def verify_token(token: str, credentials_exception) -> TokenData:
         email: str = payload.get("sub")
         user_id: str = payload.get("user_id")
         
+        print(f"DEBUG verify_token: Decoded payload: email={email}, user_id={user_id}, user_id_type={type(user_id)}")
+        
         if email is None:
+            print("DEBUG verify_token: Email is None, raising exception")
             raise credentials_exception
         
+        # ⭐ Ensure user_id is string if present
+        if user_id is not None:
+            user_id = str(user_id)
+        
         token_data = TokenData(email=email, user_id=user_id)
+        
+        print(f"DEBUG verify_token: TokenData created: email={token_data.email}, user_id={token_data.user_id}")
+        
         return token_data
-    except JWTError:
+    except JWTError as e:
+        print(f"DEBUG verify_token: JWTError occurred: {e}")
         raise credentials_exception
 
 
@@ -69,4 +87,9 @@ async def get_current_user(token: str = Depends(oauth2_scheme)) -> TokenData:
         detail="Could not validate credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
-    return verify_token(token, credentials_exception)
+    
+    token_data = verify_token(token, credentials_exception)
+    
+    print(f"DEBUG get_current_user: Returning TokenData: email={token_data.email}, user_id={token_data.user_id}")
+    
+    return token_data

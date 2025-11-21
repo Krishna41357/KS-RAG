@@ -1,7 +1,7 @@
 "use client";
 
-import React, { useState, useRef, useEffect } from 'react';
-import { Send, FileText, Loader2, MessageSquare, Trash2, Paperclip, X, LogOut, User, History, Menu, Plus, Moon, Sun } from 'lucide-react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { Send, FileText, Loader2, MessageSquare, Trash2, Paperclip, X, LogOut, User, History, Menu, Plus, AlertCircle } from 'lucide-react';
 import { useAuth } from './AuthContext';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000';
@@ -39,17 +39,12 @@ export default function Chatbot() {
   const [chats, setChats] = useState<Chat[]>([]);
   const [currentChatId, setCurrentChatId] = useState<string | null>(null);
   const [loadingChats, setLoadingChats] = useState<boolean>(false);
+  const [loadingMessages, setLoadingMessages] = useState<boolean>(false);
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(true);
   const [systemMessage, setSystemMessage] = useState<string>('');
-  const [darkMode, setDarkMode] = useState(false);
+  const [tokenValid, setTokenValid] = useState<boolean>(true); // NEW: Track token validity
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-
-  // Set initial dark mode based on system preference
-  useEffect(() => {
-    const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-    setDarkMode(isDark);
-  }, []);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -59,19 +54,71 @@ export default function Chatbot() {
     scrollToBottom();
   }, [messages]);
 
+  // ⭐ NEW: Validate token when component mounts or token changes
   useEffect(() => {
-    if (token && user) {
+    const validateToken = async () => {
+      if (!token) {
+        setTokenValid(true); // No token is fine (not logged in)
+        return;
+      }
+
+      try {
+        console.log('🔍 Validating token...');
+        const response = await fetch(`${API_BASE_URL}/users/debug/token`, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+          },
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          console.log('Token validation result:', data);
+          
+          if (data.user_id_is_none || !data.user_id) {
+            console.error('❌ Invalid token: user_id is missing');
+            setTokenValid(false);
+            showSystemMessage('Your session is invalid. Please log in again.', 'error');
+          } else {
+            console.log('✅ Token is valid with user_id:', data.user_id);
+            setTokenValid(true);
+          }
+        } else {
+          console.error('Token validation failed:', response.status);
+          setTokenValid(false);
+        }
+      } catch (error) {
+        console.error('Error validating token:', error);
+        setTokenValid(false);
+      }
+    };
+
+    validateToken();
+  }, [token]);
+
+  // Fetch chats list when user logs in and token is valid
+  useEffect(() => {
+    if (token && user && tokenValid) {
       fetchChats();
     }
-  }, [token, user]);
+  }, [token, user, tokenValid]);
 
   const showSystemMessage = (msg: string, type: 'success' | 'error' | 'info' = 'info') => {
     setSystemMessage(msg);
     setTimeout(() => setSystemMessage(''), 5000);
   };
 
-  const fetchChats = async () => {
-    if (!token) return;
+  // Handle API errors that might indicate invalid token
+  const handleApiError = (error: any, response?: Response) => {
+    if (response?.status === 401) {
+      setTokenValid(false);
+      showSystemMessage('Session expired. Please log in again.', 'error');
+      setTimeout(() => logout(), 2000);
+    }
+  };
+
+  // Fetch all chats for the sidebar
+  const fetchChats = useCallback(async () => {
+    if (!token || !tokenValid) return;
     
     setLoadingChats(true);
     try {
@@ -84,17 +131,25 @@ export default function Chatbot() {
       if (response.ok) {
         const data = await response.json();
         setChats(data);
+      } else {
+        console.error('Failed to fetch chats:', response.status);
+        handleApiError(null, response);
       }
     } catch (error) {
       console.error('Error fetching chats:', error);
     } finally {
       setLoadingChats(false);
     }
-  };
+  }, [token, tokenValid]);
 
   const createNewChat = async () => {
     if (!token) {
       showSystemMessage('Please login to create chats', 'error');
+      return;
+    }
+
+    if (!tokenValid) {
+      showSystemMessage('Invalid session. Please log in again.', 'error');
       return;
     }
 
@@ -114,6 +169,9 @@ export default function Chatbot() {
         setMessages([]);
         await fetchChats();
         showSystemMessage('New chat created!', 'success');
+      } else {
+        handleApiError(null, response);
+        showSystemMessage('Failed to create chat', 'error');
       }
     } catch (error) {
       console.error('Error creating chat:', error);
@@ -121,30 +179,85 @@ export default function Chatbot() {
     }
   };
 
-  const loadChat = async (chatId: string) => {
-    if (!token) return;
+  const loadChat = useCallback(async (chatId: string) => {
+    console.log('loadChat called with chatId:', chatId);
+    
+    if (!token) {
+      console.error('No token available');
+      showSystemMessage('Please login to view chats', 'error');
+      return;
+    }
+
+    if (!tokenValid) {
+      showSystemMessage('Invalid session. Please log in again.', 'error');
+      return;
+    }
+
+    if (chatId === currentChatId) {
+      console.log('Chat already loaded');
+      return;
+    }
+
+    setLoadingMessages(true);
+    setCurrentChatId(chatId);
 
     try {
-      const response = await fetch(`${API_BASE_URL}/chats/${chatId}`, {
+      const url = `${API_BASE_URL}/chats/${chatId}`;
+      console.log('Fetching chat from:', url);
+
+      const response = await fetch(url, {
+        method: 'GET',
         headers: {
           'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
         },
       });
 
+      console.log('Response status:', response.status);
+
+      const responseText = await response.text();
+      console.log('Response body:', responseText);
+
       if (response.ok) {
-        const data = await response.json();
-        setCurrentChatId(chatId);
-        setMessages(data.messages || []);
+        const data = responseText ? JSON.parse(responseText) : {};
+        console.log('Chat data received:', data);
+        console.log('Messages count:', data.messages?.length || 0);
+        
+        const loadedMessages: Message[] = (data.messages || []).map((msg: any) => ({
+          role: msg.role,
+          content: msg.content,
+          sources: msg.sources || [],
+          timestamp: msg.timestamp,
+        }));
+        
+        setMessages(loadedMessages);
+      } else {
+        let errorDetail = 'Failed to load chat';
+        try {
+          const errorData = responseText ? JSON.parse(responseText) : {};
+          errorDetail = errorData.detail || `Error ${response.status}: ${response.statusText}`;
+        } catch {
+          errorDetail = `Error ${response.status}: ${responseText || response.statusText}`;
+        }
+        console.error('Failed to load chat:', response.status, errorDetail);
+        showSystemMessage(errorDetail, 'error');
+        setCurrentChatId(null);
+        setMessages([]);
+        handleApiError(null, response);
       }
     } catch (error) {
       console.error('Error loading chat:', error);
       showSystemMessage('Failed to load chat', 'error');
+      setCurrentChatId(null);
+      setMessages([]);
+    } finally {
+      setLoadingMessages(false);
     }
-  };
+  }, [token, currentChatId, tokenValid]);
 
   const deleteChat = async (chatId: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!token) return;
+    if (!token || !tokenValid) return;
 
     if (!confirm('Are you sure you want to delete this chat?')) return;
 
@@ -163,6 +276,8 @@ export default function Chatbot() {
         }
         await fetchChats();
         showSystemMessage('Chat deleted', 'success');
+      } else {
+        handleApiError(null, response);
       }
     } catch (error) {
       console.error('Error deleting chat:', error);
@@ -228,24 +343,40 @@ export default function Chatbot() {
   const handleQuery = async () => {
     if (!inputMessage.trim() || querying) return;
 
-    // If user is logged in but no chat is selected, create one
-    if (token && !currentChatId) {
-      await createNewChat();
-      // Wait a bit for chat to be created
-      await new Promise(resolve => setTimeout(resolve, 500));
+    const userMessage = inputMessage.trim();
+    
+    let activeChatId = currentChatId;
+    if (token && tokenValid && !activeChatId) {
+      try {
+        const response = await fetch(`${API_BASE_URL}/chats`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ title: 'New Chat' }),
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          activeChatId = data.chat_id;
+          setCurrentChatId(activeChatId);
+          await fetchChats();
+        } else {
+          handleApiError(null, response);
+        }
+      } catch (error) {
+        console.error('Error creating chat:', error);
+      }
     }
 
-    const userMessage = inputMessage.trim();
     setInputMessage('');
-    
-    // Add user message to UI immediately
     setMessages(prev => [...prev, { role: 'user', content: userMessage }]);
     setQuerying(true);
 
     try {
-      // If logged in and have a chat, use chat endpoint
-      if (token && currentChatId) {
-        const response = await fetch(`${API_BASE_URL}/chats/${currentChatId}/messages`, {
+      if (token && tokenValid && activeChatId) {
+        const response = await fetch(`${API_BASE_URL}/chats/${activeChatId}/messages`, {
           method: 'POST',
           headers: {
             'Authorization': `Bearer ${token}`,
@@ -256,12 +387,12 @@ export default function Chatbot() {
 
         if (!response.ok) {
           const error = await response.json();
+          handleApiError(error, response);
           throw new Error(error.detail || 'Query failed');
         }
 
         const data = await response.json();
         
-        // Update the last message with assistant response
         setMessages(prev => [
           ...prev,
           {
@@ -271,10 +402,8 @@ export default function Chatbot() {
           }
         ]);
 
-        // Refresh chat list to update title and message count
         await fetchChats();
       } else {
-        // Fallback to public query endpoint for non-logged-in users
         const response = await fetch(`${API_BASE_URL}/query`, {
           method: 'POST',
           headers: {
@@ -300,7 +429,6 @@ export default function Chatbot() {
       }
     } catch (error: any) {
       showSystemMessage(`Error: ${error.message}`, 'error');
-      // Remove the user message that failed
       setMessages(prev => prev.slice(0, -1));
     } finally {
       setQuerying(false);
@@ -323,15 +451,38 @@ export default function Chatbot() {
     setCurrentChatId(null);
   };
 
+  const currentChatTitle = currentChatId 
+    ? chats.find(c => c.id === currentChatId)?.title || 'Chat'
+    : 'RAG Chatbot';
+
   return (
     <div className="flex h-screen bg-gray-900">
-      {/* Left Sidebar */}
+      {/* ⭐ NEW: Invalid Token Warning Banner */}
+      {token && !tokenValid && (
+        <div className="absolute top-0 left-0 right-0 bg-red-600 text-white px-4 py-3 z-50">
+          <div className="max-w-4xl mx-auto flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <AlertCircle className="w-5 h-5" />
+              <p className="text-sm font-medium">
+                Your session is invalid. Please log out and log back in to continue.
+              </p>
+            </div>
+            <button
+              onClick={logout}
+              className="bg-white text-red-600 px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-100 transition-colors"
+            >
+              Log Out
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* LEFT SIDEBAR */}
       <div className={`${sidebarOpen ? 'w-72' : 'w-0'} transition-all duration-300 bg-gray-950 border-r border-gray-800 flex flex-col overflow-hidden`}>
-        {/* Sidebar Header */}
         <div className="p-4 border-b border-gray-800">
           <button
             onClick={createNewChat}
-            disabled={!token}
+            disabled={!token || !tokenValid}
             className="w-full bg-red-600 hover:bg-red-700 disabled:bg-gray-700 disabled:text-gray-500 text-white px-4 py-3 rounded-lg transition-colors flex items-center justify-center gap-2 font-medium"
           >
             <Plus className="w-5 h-5" />
@@ -339,7 +490,6 @@ export default function Chatbot() {
           </button>
         </div>
 
-        {/* Chats List */}
         <div className="flex-1 overflow-y-auto p-3 space-y-2">
           <div className="text-xs font-semibold text-gray-400 px-3 py-2 flex items-center gap-2">
             <History className="w-4 h-4" />
@@ -350,6 +500,12 @@ export default function Chatbot() {
             <div className="text-center text-gray-500 py-8 px-4">
               <User className="w-12 h-12 mx-auto mb-2 opacity-30" />
               <p className="text-sm">Login to save chats</p>
+            </div>
+          ) : !tokenValid ? (
+            <div className="text-center text-yellow-500 py-8 px-4">
+              <AlertCircle className="w-12 h-12 mx-auto mb-2" />
+              <p className="text-sm font-medium">Invalid Session</p>
+              <p className="text-xs mt-2">Please log out and log back in</p>
             </div>
           ) : loadingChats ? (
             <div className="flex items-center justify-center py-8">
@@ -366,10 +522,14 @@ export default function Chatbot() {
                 key={chat.id}
                 onClick={() => loadChat(chat.id)}
                 className={`${
-                  currentChatId === chat.id ? 'bg-red-900 border-red-700' : 'bg-gray-800 hover:bg-gray-700'
-                } rounded-lg p-3 cursor-pointer transition-colors border border-gray-700 group relative`}
+                  currentChatId === chat.id 
+                    ? 'bg-red-900/50 border-red-600' 
+                    : 'bg-gray-800 hover:bg-gray-700 border-gray-700'
+                } rounded-lg p-3 cursor-pointer transition-all border group relative`}
               >
-                <p className="text-sm text-white font-medium line-clamp-1 mb-1 pr-8">{chat.title}</p>
+                <p className="text-sm text-white font-medium line-clamp-1 mb-1 pr-8">
+                  {chat.title}
+                </p>
                 <div className="flex items-center justify-between text-xs text-gray-400">
                   <span className="flex items-center gap-1">
                     <MessageSquare className="w-3 h-3" />
@@ -388,7 +548,6 @@ export default function Chatbot() {
           )}
         </div>
 
-        {/* User Info Section */}
         {user && (
           <div className="p-4 border-t border-gray-800">
             <div className="bg-gray-800 rounded-lg p-3">
@@ -413,9 +572,8 @@ export default function Chatbot() {
         )}
       </div>
 
-      {/* Main Chat Area */}
+      {/* MAIN CHAT AREA - Rest of your existing code remains the same */}
       <div className="flex-1 flex flex-col bg-gray-800">
-        {/* Top Bar */}
         <div className="bg-gray-900 border-b border-gray-700 p-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <button
@@ -426,9 +584,7 @@ export default function Chatbot() {
             </button>
             <div className="flex items-center gap-2">
               <MessageSquare className="w-6 h-6 text-red-500" />
-              <h1 className="text-xl font-bold text-white">
-                {currentChatId && chats.find(c => c.id === currentChatId)?.title || 'RAG Chatbot'}
-              </h1>
+              <h1 className="text-xl font-bold text-white">{currentChatTitle}</h1>
             </div>
           </div>
           {messages.length > 0 && (
@@ -442,7 +598,6 @@ export default function Chatbot() {
           )}
         </div>
 
-        {/* System Message Toast */}
         {systemMessage && (
           <div className="bg-gray-900 border-b border-gray-700 px-4 py-2">
             <div className="max-w-4xl mx-auto">
@@ -451,9 +606,15 @@ export default function Chatbot() {
           </div>
         )}
 
-        {/* Messages Area */}
         <div className="flex-1 overflow-y-auto">
-          {messages.length === 0 ? (
+          {loadingMessages ? (
+            <div className="h-full flex items-center justify-center">
+              <div className="text-center">
+                <Loader2 className="w-10 h-10 animate-spin text-red-500 mx-auto mb-4" />
+                <p className="text-gray-400">Loading messages...</p>
+              </div>
+            </div>
+          ) : messages.length === 0 ? (
             <div className="h-full flex items-center justify-center">
               <div className="text-center text-gray-400 max-w-md px-4">
                 <MessageSquare className="w-20 h-20 mx-auto mb-6 text-red-500 opacity-50" />
@@ -484,7 +645,10 @@ export default function Chatbot() {
           ) : (
             <div className="max-w-4xl mx-auto px-4 py-6 space-y-6">
               {messages.map((msg, idx) => (
-                <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                <div 
+                  key={idx} 
+                  className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+                >
                   <div className={`max-w-[85%] rounded-2xl px-5 py-4 ${
                     msg.role === 'user' 
                       ? 'bg-red-600 text-white' 
@@ -518,6 +682,7 @@ export default function Chatbot() {
                   </div>
                 </div>
               ))}
+              
               {querying && (
                 <div className="flex justify-start">
                   <div className="bg-gray-700 border border-gray-600 rounded-2xl px-5 py-4">
@@ -525,12 +690,12 @@ export default function Chatbot() {
                   </div>
                 </div>
               )}
+              
               <div ref={messagesEndRef} />
             </div>
           )}
         </div>
 
-        {/* File Attachments Preview */}
         {files.length > 0 && (
           <div className="bg-gray-900 border-t border-gray-700 px-4 py-3">
             <div className="max-w-4xl mx-auto flex flex-wrap gap-2">
@@ -550,7 +715,6 @@ export default function Chatbot() {
           </div>
         )}
 
-        {/* Input Area */}
         <div className="bg-gray-900 border-t border-gray-700 p-4">
           <div className="max-w-4xl mx-auto">
             <div className="bg-gray-800 rounded-2xl border border-gray-700 flex items-center gap-2 p-2">
@@ -577,12 +741,12 @@ export default function Chatbot() {
                 onKeyPress={handleKeyPress}
                 placeholder={files.length > 0 ? "Press Enter to upload files..." : "Ask anything about your documents..."}
                 className="flex-1 bg-transparent text-white placeholder-gray-500 px-4 py-3 focus:outline-none"
-                disabled={querying || uploading}
+                disabled={querying || uploading || !tokenValid}
               />
               
               <button
                 onClick={files.length > 0 ? handleUpload : handleQuery}
-                disabled={(querying || uploading) || (files.length === 0 && !inputMessage.trim())}
+                disabled={(querying || uploading || !tokenValid) || (files.length === 0 && !inputMessage.trim())}
                 className="bg-red-600 hover:bg-red-700 disabled:bg-gray-700 disabled:text-gray-500 text-white p-3 rounded-xl transition-colors"
               >
                 {uploading ? (
@@ -596,7 +760,9 @@ export default function Chatbot() {
             </div>
             <p className="text-xs text-gray-500 text-center mt-2">
               {user 
-                ? `Logged in as ${user.username} • Chat history is saved` 
+                ? tokenValid 
+                  ? `Logged in as ${user.username} • Chat history is saved`
+                  : 'Invalid session • Please log out and log back in'
                 : 'Not logged in • Messages are not saved'}
             </p>
           </div>
@@ -604,4 +770,4 @@ export default function Chatbot() {
       </div>
     </div>
   );
-} 
+}
