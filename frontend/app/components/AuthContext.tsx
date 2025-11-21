@@ -106,7 +106,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           email,
           username,
           password,
-          full_name: fullName || undefined,
+          full_name: fullName || null,
         }),
       });
 

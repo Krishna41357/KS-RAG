@@ -211,7 +211,7 @@ export default function LoginSignup() {
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••"
                   required
-                  minLength={6}
+                  minLength={8}
                   className={`w-full pl-12 pr-4 py-3 rounded-xl border-2 transition-all focus:outline-none focus:scale-105 ${
                     darkMode
                       ? 'bg-slate-700/50 border-slate-600 focus:border-red-500 text-white placeholder-gray-400'
@@ -221,7 +221,7 @@ export default function LoginSignup() {
               </div>
               {!isLogin && (
                 <p className={`mt-1 text-xs ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                  Password must be at least 6 characters
+                  Password must be at least 8 characters
                 </p>
               )}
             </div>
