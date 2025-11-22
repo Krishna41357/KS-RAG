@@ -1,345 +1,122 @@
-# RAG Chatbot — Complete Setup Guide
+# 🤖KS RAG Chatbot - PDF Question Answering System
 
-A full-stack RAG (Retrieval-Augmented Generation) chatbot with FastAPI backend and Streamlit frontend.
+A full-stack **Retrieval-Augmented Generation (RAG)** chatbot for uploading PDFs and asking questions about their content. Built with FastAPI, Next.js, MongoDB, Cohere embeddings, and Groq's Llama 3.3 70B.
 
-## 📋 Project Structure
+![RAG Chatbot](https://img.shields.io/badge/RAG-Chatbot-red?style=for-the-badge)
+![Python](https://img.shields.io/badge/Python-3.11-blue?style=for-the-badge&logo=python)
+![Next.js](https://img.shields.io/badge/Next.js-16.0-black?style=for-the-badge&logo=next.js)
 
-```
-RAG_chatbot/
-├── server/                    # FastAPI backend
-│   ├── app.py                # Main FastAPI app
-│   ├── vectorstore.py        # Vector indexing & querying (OpenAI embeddings + JSON store)
-│   ├── pdf_utils.py          # PDF extraction & chunking
-│   ├── requirements.txt       # Backend dependencies
-│   ├── README.md             # Backend docs
-│   └── .env.example          # Backend env template
-│
-└── client/                    # Streamlit frontend
-    ├── app.py                # Main Streamlit UI
-    ├── requirements.txt       # Frontend dependencies
-    ├── README.md             # Frontend docs
-    └── .env.example          # Frontend env template
-```
+## ✨ Features
 
-## 🚀 Quick Start (Windows PowerShell)
+- 📄 Upload up to 4 PDFs simultaneously with automatic chunking & vector embeddings
+- 💬 Context-aware Q&A using semantic search and RAG
+- 👤 JWT authentication with secure password hashing
+- 🗂️ Multiple chat conversations with auto-generated titles
+- 🎨 Modern dark UI with responsive design
+
+## 🚀 Quick Start
 
 ### Prerequisites
-- Python 3.8 or higher
-- OpenAI API key ([get one here](https://platform.openai.com/api-keys))
+- Python 3.11+, Node.js 18+, MongoDB
+- API Keys: [Cohere](https://dashboard.cohere.com/api-keys) & [Groq](https://console.groq.com/keys)
 
-### Step 1: Set Up Backend
+### Installation
 
-```powershell
-# Navigate to server folder
-cd server
+**1. Clone & Setup Backend**
+```bash
+git clone https://github.com/Krishna41357/KS-RAG.git
+cd KS-RAG/server
 
-# Create virtual environment
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-
-# Install dependencies
+python -m venv ragbot
+source ragbot/bin/activate  # Windows: ragbot\Scripts\activate
 pip install -r requirements.txt
 
-# Create .env file with your OpenAI API key
-# (or set it as an environment variable)
-$env:OPENAI_API_KEY = 'sk-...'
-
-# Start the backend server
-uvicorn app:app --reload --port 8000
+# Create .env file
+cp .env.example .env
 ```
 
-You should see:
-```
-INFO:     Uvicorn running on http://127.0.0.1:8000
-```
-
-**Keep this terminal open!** The server must run while you use the frontend.
-
-### Step 2: Set Up Frontend (in a new terminal)
-
-```powershell
-# Navigate to client folder
-cd client
-
-# Create virtual environment
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Start Streamlit frontend
-streamlit run app.py
+**Edit `server/.env`:**
+```env
+MONGO_URI=mongodb://localhost:27017/rag_database
+COHERE_API_KEY=your_cohere_api_key
+GROQ_API_KEY=your_groq_api_key
+SECRET_KEY=your_secret_key_32_chars_minimum
 ```
 
-Streamlit will open your default browser at `http://localhost:8501`.
-
----
-
-## 📖 Full Usage
-
-### 1. Upload PDFs (Frontend)
-- Open the Streamlit app (http://localhost:8501)
-- Use the left sidebar to select up to 4 PDF files
-- Click **"Upload & Index"**
-- Wait for the status message (indexing takes ~30–60s depending on PDF size and OpenAI API)
-
-### 2. Ask Questions (Frontend)
-- Once documents are indexed, type a question
-- Click **"Ask"**
-- View the AI-generated answer with source citations
-
-### 3. View Sources
-- Expand **"📖 Sources"** to see which document chunks were used
-- Chat history is preserved in the session
-
----
-
-## 🔧 Configuration
-
-### Backend Configuration
-
-**File:** `server/.env` (or environment variables)
-
-```
-OPENAI_API_KEY=sk-...  # Required: Your OpenAI API key
+**Start backend:**
+```bash
+uvicorn main:app --reload --port 9000
 ```
 
-**Other settings (in `server/vectorstore.py`):**
-- Embedding model: `text-embedding-3-small` (OpenAI)
-- Chat model: `gpt-3.5-turbo` (OpenAI)
-- Vector storage: JSON file (persisted to `server/data/chroma_db/`)
-- Top-k retrieval: 4 documents
+**2. Setup Frontend**
+```bash
+cd ../client
+npm install
 
-### Frontend Configuration
-
-**File:** `client/.env` (optional)
-
-```
-BACKEND_URL=http://localhost:8000  # Backend address (default)
+# Create .env.local
+cp .env.example .env.local
 ```
 
----
-
-## 🧪 Testing the API Directly
-
-### Upload PDFs (via curl)
-
-```powershell
-curl -X POST "http://localhost:8000/upload" -F "files=@file1.pdf" -F "files=@file2.pdf"
+**Edit `client/.env.local`:**
+```env
+NEXT_PUBLIC_API_BASE_URL=http://localhost:9000
 ```
 
-**Response:**
-```json
-{
-  "indexed_files": 2,
-  "indexed_chunks": 145
-}
+**Start frontend:**
+```bash
+npm run dev
 ```
 
-### Ask a Question (via curl)
+Visit `http://localhost:3000`
 
-```powershell
-curl -X POST "http://localhost:8000/query" `
-  -H "Content-Type: application/json" `
-  -d '{"question": "What is the main topic?"}'
-```
+## 📖 Usage
 
-**Response:**
-```json
-{
-  "answer": "The main topic is...",
-  "sources": [
-    {
-      "source": "file1.pdf",
-      "page": 1,
-      "snippet": "..."
-    }
-  ]
-}
-```
+1. **Sign up/Login** at the homepage
+2. **Upload PDFs** using the paperclip icon (up to 4 files)
+3. **Ask questions** and get AI-powered answers with source citations
+4. **Manage chats** from the sidebar
 
----
+## 🛠️ Tech Stack
 
-## 🐛 Troubleshooting
+**Backend:** FastAPI, MongoDB, PyPDF2, Cohere, Groq, JWT  
+**Frontend:** Next.js 16, TypeScript, TailwindCSS, Lucide React
 
-### "ModuleNotFoundError" when starting backend
-- Activate the virtual environment: `.\.venv\Scripts\Activate.ps1`
-- Reinstall requirements: `pip install -r requirements.txt`
+## 🔌 Key API Endpoints
 
-### "Could not connect to backend" in frontend
-- Verify the backend is running: Check the backend terminal for "Uvicorn running"
-- Check `BACKEND_URL` in `client/.env` matches your backend address
-- If on different machines, update `BACKEND_URL` to the backend server's IP/hostname
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/users/register` | Register user |
+| POST | `/users/login` | Login user |
+| POST | `/upload` | Upload PDFs |
+| POST | `/chats/{id}/messages` | Send message & get response |
+| GET | `/chats` | List user chats |
 
-### "No documents indexed yet"
-- Upload PDFs first and wait for the success message in Streamlit
-
-### Slow responses / API errors
-- Check `OPENAI_API_KEY` is set correctly
-- Verify your OpenAI account has API credits
-- Check OpenAI API status at https://status.openai.com
-
-### PDF not being recognized
-- Ensure files are valid PDF files (not encrypted or corrupted)
-- Try uploading one PDF at a time
-
----
-
-## 📦 Dependencies
-
-### Backend
-- **FastAPI** — Web framework
-- **Uvicorn** — ASGI server
-- **OpenAI** — Embeddings & Chat API
-- **pypdf** — PDF text extraction
-- **numpy** — Vector similarity computation
-- **aiofiles, loguru, requests** — Utilities
-
-### Frontend
-- **Streamlit** — UI framework
-- **Requests** — HTTP client for backend calls
-- **python-dotenv** — Environment variable management
-
----
-
-## 🎯 Architecture Overview
+## 📁 Project Structure
 
 ```
-┌─────────────┐                      ┌──────────────┐
-│  Streamlit  │ (http://localhost:8501)             │
-│  Frontend   │                      │              │
-│  (browser)  │                      │              │
-└──────┬──────┘                      │              │
-       │                             │              │
-       │ POST /upload (PDF files)    │              │
-       │ POST /query (question)      │              │
-       │ ──────────────────────────▶ │              │
-       │                             │              │
-       │     ◀─────────────────────  │ FastAPI     │
-       │      (JSON response)        │ Backend     │
-       │                             │ (localhost) │
-       │                             │              │
-       │                             │              │
-       │                             │ ┌──────────┐│
-       │                             │ │ PDF      ││
-       │                             │ │ Chunking ││
-       │                             │ │ & Split  ││
-       │                             │ └──────────┘│
-       │                             │              │
-       │                             │ ┌──────────┐│
-       │                             │ │ OpenAI   ││
-       │                             │ │Embeddings││
-       │                             │ └──────────┘│
-       │                             │              │
-       │                             │ ┌──────────┐│
-       │                             │ │ Vector   ││
-       │                             │ │ Index    ││
-       │                             │ │(JSON)    ││
-       │                             │ └──────────┘│
-       │                             │              │
-       │                             │ ┌──────────┐│
-       │                             │ │ OpenAI   ││
-       │                             │ │ Chat     ││
-       │                             │ │(QA Gen)  ││
-       │                             │ └──────────┘│
-       │                             │              │
-       └─────────────────────────────┘              │
-                                                   │
-                    http://localhost:8000         │
-                                                   │
-                                                   │
-                    server/data/                   │
-                    └─ chroma_db/                  │
-                       └─ index.json (vectors)    │
+KS-RAG/
+├── server/              # FastAPI backend
+│   ├── main.py         # Entry point
+│   ├── vectorstore.py  # PDF processing
+│   ├── routes/         # API endpoints
+│   └── .env.example
+├── client/             # Next.js frontend
+│   ├── app/           # Pages
+│   ├── components/    # React components
+│   └── .env.example
+└── README.md
 ```
 
----
+## 👨‍💻 Author
 
-## 📝 API Endpoints
-
-### POST `/upload`
-Upload PDF files to index.
-
-**Request:** multipart/form-data with files
-```
-files: [file1.pdf, file2.pdf, ...]  (max 4)
-```
-
-**Response:** 200 OK
-```json
-{
-  "indexed_files": 2,
-  "indexed_chunks": 150
-}
-```
-
-**Errors:**
-- 400: More than 4 files, or non-PDF files provided
-- 500: Indexing failed (check OPENAI_API_KEY)
-
-### POST `/query`
-Ask a question about the indexed documents.
-
-**Request:** application/json
-```json
-{
-  "question": "What is the main topic?"
-}
-```
-
-**Response:** 200 OK
-```json
-{
-  "answer": "The main topic is...",
-  "sources": [
-    {
-      "source": "file1.pdf",
-      "page": 1,
-      "snippet": "The first page contains..."
-    }
-  ]
-}
-```
-
-**Errors:**
-- 400: Empty question
-- 500: No documents indexed, or API error
-
----
-
-## 🌟 Next Steps & Enhancements
-
-- [ ] Add batch processing for large PDFs
-- [ ] Support for different embedding models (Hugging Face, Azure)
-- [ ] PostgreSQL vector DB instead of JSON (for scalability)
-- [ ] Docker containerization for easy deployment
-- [ ] User authentication & multi-tenant support
-- [ ] PDF preview in Streamlit
-- [ ] Export Q&A results to PDF
-- [ ] Web-based admin dashboard for document management
-
----
+**Krishna Srivastava**  
+GitHub: [@Krishna41357](https://github.com/Krishna41357)  
+Email: krishnasrivastava41357@gmail.com
 
 ## 📄 License
 
-This project is provided as-is for educational and internal use.
+MIT License
 
 ---
 
-## 🤝 Support
-
-For issues, check:
-1. Backend logs: Check the terminal running `uvicorn`
-2. Frontend logs: Check Streamlit terminal output
-3. API responses: Use curl to test endpoints directly
-4. Environment variables: Verify `OPENAI_API_KEY` is set
-
-**Common Issues:**
-- Backend not running: Start it with `uvicorn app:app --reload --port 8000`
-- API key missing: Set `OPENAI_API_KEY` environment variable
-- Connection refused: Ensure both services are running and on correct ports
-
----
-
-**Made with ❤️ — RAG Chatbot**
+**Built with ❤️ by Krishna Srivastava**
