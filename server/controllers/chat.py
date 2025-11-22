@@ -125,10 +125,25 @@ def get_chat_by_id(chat_id: str, user_id: str) -> Optional[ChatResponse]:
 
         messages = []
         for msg in chat.get("messages", []):
+            # ⭐ FIX: Transform source fields to match Pydantic model
+            sources_raw = msg.get("sources", [])
+            sources_transformed = []
+            
+            if sources_raw:
+                for s in sources_raw:
+                    # Handle both old format (pdf_name, text) and new format (title, content)
+                    source_dict = {
+                        "title": s.get("title") or s.get("pdf_name", "Unknown"),
+                        "content": s.get("content") or s.get("text", ""),
+                        "url": s.get("url"),
+                        "score": s.get("score")
+                    }
+                    sources_transformed.append(Source(**source_dict))
+            
             messages.append(Message(
                 role=msg.get("role", "user"),
                 content=msg.get("content", ""),
-                sources=[Source(**s) for s in msg.get("sources", [])] if msg.get("sources") else [],
+                sources=sources_transformed,
                 timestamp=msg.get("timestamp", datetime.utcnow())
             ))
 
@@ -146,7 +161,6 @@ def get_chat_by_id(chat_id: str, user_id: str) -> Optional[ChatResponse]:
         import traceback
         traceback.print_exc()
         return None
-
 
 def add_message_to_chat(
     chat_id: str,

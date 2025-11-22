@@ -3,30 +3,59 @@ from dotenv import load_dotenv
 from pymongo import MongoClient
 from numpy import dot
 from numpy.linalg import norm
-from cohere import Client as CohereClient
-from groq import Groq
 
 load_dotenv()
+
+# MongoDB setup (this is fine at module level)
 mongo_uri = os.getenv("MONGO_URI")
-cohere_api_key = os.getenv("COHERE_API_KEY")
-groq_api_key = os.getenv("GROQ_API_KEY")
+if not mongo_uri:
+    raise RuntimeError("MONGO_URI not set!")
 
 mongo_client = MongoClient(mongo_uri)
 db = mongo_client["rag_database"]
 collection = db["documents"]
-cohere = CohereClient(cohere_api_key)
-groq = Groq(api_key=groq_api_key)
+
+# Lazy-initialized clients
+_cohere_client = None
+_groq_client = None
+
+
+def get_cohere():
+    """Lazy initialization of Cohere client."""
+    global _cohere_client
+    if _cohere_client is None:
+        from cohere import Client as CohereClient
+        api_key = os.getenv("COHERE_API_KEY")
+        if not api_key:
+            raise RuntimeError("COHERE_API_KEY environment variable not set!")
+        print(f"DEBUG: Initializing Cohere (key length: {len(api_key)})")
+        _cohere_client = CohereClient(api_key)
+    return _cohere_client
+
+
+def get_groq():
+    """Lazy initialization of Groq client."""
+    global _groq_client
+    if _groq_client is None:
+        from groq import Groq
+        api_key = os.getenv("GROQ_API_KEY")
+        if not api_key:
+            raise RuntimeError("GROQ_API_KEY environment variable not set!")
+        print(f"DEBUG: Initializing Groq (key length: {len(api_key)})")
+        _groq_client = Groq(api_key=api_key)
+    return _groq_client
 
 
 def get_relevant_chunks(query: str, k: int = 4):
     """Find top-k relevant chunks based on cosine similarity with metadata."""
+    cohere = get_cohere()  # Lazy init here
+    
     query_emb = cohere.embed(
         model="embed-english-v3.0",
         texts=[query],
         input_type="search_query"
     ).embeddings[0]
 
-    # Fetch documents with metadata
     all_docs = list(collection.find({}, {
         "text": 1, 
         "embedding": 1, 
@@ -46,21 +75,19 @@ def get_relevant_chunks(query: str, k: int = 4):
             "chunk_id": doc.get("chunk_id", "unknown")
         })
 
-    # Sort by score descending
     scored.sort(reverse=True, key=lambda x: x["score"])
-    top_chunks = scored[:k]
-    
-    return top_chunks
+    return scored[:k]
 
 
 def answer_query(query: str):
     """Generate answer using Groq model based on relevant chunks."""
+    groq = get_groq()  # Lazy init here
+    
     top_chunks = get_relevant_chunks(query)
 
     if not top_chunks:
         return "No relevant context found in the uploaded PDFs.", []
 
-    # Extract just the text for context
     context = "\n\n".join([chunk["text"] for chunk in top_chunks])
     
     prompt = f"""Based on the following context from the documents, answer the question accurately and concisely.
@@ -83,13 +110,13 @@ Answer:"""
 
     answer = response.choices[0].message.content
     
-    # Return structured sources with metadata
+    # ⭐ FIX: Map fields to match Pydantic Source model (title, content, url, score)
     sources = [
         {
-            "pdf_name": chunk["pdf_name"],
-            "page": chunk["page"],
+            "title": f"{chunk['pdf_name']} (Page {chunk['page']})",  # Changed from pdf_name to title
+            "content": chunk["text"][:300],  # Changed from snippet to content
             "score": chunk["score"],
-            "snippet": chunk["text"][:300]  # First 300 chars as snippet
+            "url": None  # Optional field, set to None if not available
         }
         for chunk in top_chunks
     ]
