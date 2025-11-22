@@ -97,27 +97,59 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const register = async (email: string, username: string, password: string, fullName?: string) => {
     try {
+      // Validate inputs
+      if (!email || !username || !password) {
+        throw new Error('Email, username, and password are required');
+      }
+
+      if (username.length < 3 || username.length > 50) {
+        throw new Error('Username must be between 3 and 50 characters');
+      }
+
+      if (password.length < 8) {
+        throw new Error('Password must be at least 8 characters long');
+      }
+
+      // Build the request payload
+      const payload: any = {
+        email: email.trim(),
+        username: username.trim(),
+        password: password,
+      };
+      
+      // Only add full_name if it's provided and not empty
+      if (fullName && fullName.trim()) {
+        payload.full_name = fullName.trim();
+      }
+
       const response = await fetch(`${API_BASE_URL}/users/register`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          email,
-          username,
-          password,
-          full_name: fullName || null,
-        }),
+        body: JSON.stringify(payload),
       });
 
       if (!response.ok) {
         const error = await response.json();
+        
+        // Handle validation errors (422 Unprocessable Entity)
+        if (response.status === 422 && error.detail && Array.isArray(error.detail)) {
+          const errorMessages = error.detail.map((err: any) => {
+            const field = err.loc?.[err.loc.length - 1] || 'field';
+            return `${field}: ${err.msg}`;
+          }).join(', ');
+          throw new Error(errorMessages);
+        }
+        
+        // Handle other errors
         throw new Error(error.detail || 'Registration failed');
       }
 
       // After successful registration, automatically log in
       await login(email, password);
     } catch (error: any) {
+      // Re-throw the error to be handled by the component
       throw error;
     }
   };

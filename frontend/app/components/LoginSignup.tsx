@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from 'react';
-import { Mail, Lock, User, UserPlus, LogIn, AlertCircle, Loader2, Moon, Sun } from 'lucide-react';
+import { Mail, Lock, User, UserPlus, LogIn, AlertCircle, Loader2, Moon, Sun, CheckCircle } from 'lucide-react';
 import { useAuth } from './AuthContext';
 
 export default function LoginSignup() {
@@ -11,8 +11,10 @@ export default function LoginSignup() {
   const [username, setUsername] = useState('');
   const [fullName, setFullName] = useState('');
   const [error, setError] = useState('');
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [isLoading, setIsLoading] = useState(false);
   const [darkMode, setDarkMode] = useState(false);
+  const [successMessage, setSuccessMessage] = useState('');
 
   const { login, register } = useAuth();
 
@@ -22,21 +24,69 @@ export default function LoginSignup() {
     setDarkMode(isDark);
   }, []);
 
+  // Client-side validation
+  const validateForm = (): boolean => {
+    const errors: Record<string, string> = {};
+
+    // Email validation
+    if (!email) {
+      errors.email = 'Email is required';
+    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      errors.email = 'Invalid email format';
+    }
+
+    // Username validation (signup only)
+    if (!isLogin) {
+      if (!username) {
+        errors.username = 'Username is required';
+      } else if (username.length < 3) {
+        errors.username = 'Username must be at least 3 characters';
+      } else if (username.length > 50) {
+        errors.username = 'Username must be less than 50 characters';
+      } else if (!/^[a-zA-Z0-9_-]+$/.test(username)) {
+        errors.username = 'Username can only contain letters, numbers, underscores, and hyphens';
+      }
+    }
+
+    // Password validation
+    if (!password) {
+      errors.password = 'Password is required';
+    } else if (password.length < 8) {
+      errors.password = 'Password must be at least 8 characters';
+    }
+
+    setFieldErrors(errors);
+    return Object.keys(errors).length === 0;
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    setSuccessMessage('');
+    setFieldErrors({});
+
+    // Client-side validation
+    if (!validateForm()) {
+      return;
+    }
+
     setIsLoading(true);
 
     try {
       if (isLogin) {
         await login(email, password);
+        setSuccessMessage('Login successful! Redirecting...');
       } else {
-        if (!username.trim()) {
-          throw new Error('Username is required');
-        }
-        await register(email, username, password, fullName);
+        await register(
+          email, 
+          username, 
+          password, 
+          fullName.trim() || undefined
+        );
+        setSuccessMessage('Account created! Logging you in...');
       }
     } catch (err: any) {
+      console.error('Auth error:', err);
       setError(err.message || 'An error occurred');
     } finally {
       setIsLoading(false);
@@ -46,10 +96,32 @@ export default function LoginSignup() {
   const toggleMode = () => {
     setIsLogin(!isLogin);
     setError('');
+    setSuccessMessage('');
+    setFieldErrors({});
     setEmail('');
     setPassword('');
     setUsername('');
     setFullName('');
+  };
+
+  const handleFieldChange = (field: string, value: string) => {
+    // Clear field error when user starts typing
+    if (fieldErrors[field]) {
+      setFieldErrors(prev => {
+        const newErrors = { ...prev };
+        delete newErrors[field];
+        return newErrors;
+      });
+    }
+    setError('');
+
+    // Update field value
+    switch(field) {
+      case 'email': setEmail(value); break;
+      case 'username': setUsername(value); break;
+      case 'password': setPassword(value); break;
+      case 'fullName': setFullName(value); break;
+    }
   };
 
   return (
@@ -101,6 +173,19 @@ export default function LoginSignup() {
             ? 'bg-slate-800/40 border-red-500/20 hover:border-red-500/40'
             : 'bg-white/80 border-red-200/50 hover:border-red-400/50'
         }`}>
+          {/* Success Message */}
+          {successMessage && (
+            <div className={`mb-6 p-4 rounded-xl flex items-start gap-3 ${
+              darkMode
+                ? 'bg-green-900/30 border border-green-700/50'
+                : 'bg-green-50 border border-green-300'
+            }`}>
+              <CheckCircle className={`w-5 h-5 flex-shrink-0 mt-0.5 ${darkMode ? 'text-green-400' : 'text-green-600'}`} />
+              <p className={`text-sm ${darkMode ? 'text-green-300' : 'text-green-800'}`}>{successMessage}</p>
+            </div>
+          )}
+
+          {/* Error Message */}
           {error && (
             <div className={`mb-6 p-4 rounded-xl flex items-start gap-3 animate-shake ${
               darkMode
@@ -127,16 +212,24 @@ export default function LoginSignup() {
                 <input
                   type="email"
                   value={email}
-                  onChange={(e) => setEmail(e.target.value)}
+                  onChange={(e) => handleFieldChange('email', e.target.value)}
                   placeholder="you@example.com"
                   required
-                  className={`w-full pl-12 pr-4 py-3 rounded-xl border-2 transition-all focus:outline-none focus:scale-105 ${
-                    darkMode
+                  disabled={isLoading}
+                  className={`w-full pl-12 pr-4 py-3 rounded-xl border-2 transition-all focus:outline-none focus:scale-105 disabled:opacity-50 disabled:cursor-not-allowed ${
+                    fieldErrors.email 
+                      ? 'border-red-500' 
+                      : darkMode
                       ? 'bg-slate-700/50 border-slate-600 focus:border-red-500 text-white placeholder-gray-400'
                       : 'bg-white border-gray-300 focus:border-red-500 text-black placeholder-gray-400'
                   }`}
                 />
               </div>
+              {fieldErrors.email && (
+                <p className={`mt-1 text-sm ${darkMode ? 'text-red-400' : 'text-red-600'}`}>
+                  {fieldErrors.email}
+                </p>
+              )}
             </div>
 
             {/* Username Field (Sign Up Only) */}
@@ -145,7 +238,7 @@ export default function LoginSignup() {
                 <label className={`block text-sm font-medium mb-2 ${
                   darkMode ? 'text-gray-300' : 'text-gray-700'
                 }`}>
-                  Username
+                  Username <span className="text-red-500">*</span>
                 </label>
                 <div className="relative group">
                   <User className={`absolute left-4 top-1/2 transform -translate-y-1/2 w-5 h-5 transition-colors ${
@@ -154,16 +247,27 @@ export default function LoginSignup() {
                   <input
                     type="text"
                     value={username}
-                    onChange={(e) => setUsername(e.target.value)}
+                    onChange={(e) => handleFieldChange('username', e.target.value)}
                     placeholder="johndoe"
                     required
-                    className={`w-full pl-12 pr-4 py-3 rounded-xl border-2 transition-all focus:outline-none focus:scale-105 ${
-                      darkMode
+                    disabled={isLoading}
+                    className={`w-full pl-12 pr-4 py-3 rounded-xl border-2 transition-all focus:outline-none focus:scale-105 disabled:opacity-50 disabled:cursor-not-allowed ${
+                      fieldErrors.username 
+                        ? 'border-red-500' 
+                        : darkMode
                         ? 'bg-slate-700/50 border-slate-600 focus:border-red-500 text-white placeholder-gray-400'
                         : 'bg-white border-gray-300 focus:border-red-500 text-black placeholder-gray-400'
                     }`}
                   />
                 </div>
+                {fieldErrors.username && (
+                  <p className={`mt-1 text-sm ${darkMode ? 'text-red-400' : 'text-red-600'}`}>
+                    {fieldErrors.username}
+                  </p>
+                )}
+                <p className={`mt-1 text-xs ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                  3-50 characters, letters, numbers, underscores, and hyphens only
+                </p>
               </div>
             )}
 
@@ -173,7 +277,7 @@ export default function LoginSignup() {
                 <label className={`block text-sm font-medium mb-2 ${
                   darkMode ? 'text-gray-300' : 'text-gray-700'
                 }`}>
-                  Full Name (Optional)
+                  Full Name <span className="text-xs text-gray-500">(Optional)</span>
                 </label>
                 <div className="relative group">
                   <User className={`absolute left-4 top-1/2 transform -translate-y-1/2 w-5 h-5 transition-colors ${
@@ -182,9 +286,10 @@ export default function LoginSignup() {
                   <input
                     type="text"
                     value={fullName}
-                    onChange={(e) => setFullName(e.target.value)}
+                    onChange={(e) => handleFieldChange('fullName', e.target.value)}
                     placeholder="John Doe"
-                    className={`w-full pl-12 pr-4 py-3 rounded-xl border-2 transition-all focus:outline-none focus:scale-105 ${
+                    disabled={isLoading}
+                    className={`w-full pl-12 pr-4 py-3 rounded-xl border-2 transition-all focus:outline-none focus:scale-105 disabled:opacity-50 disabled:cursor-not-allowed ${
                       darkMode
                         ? 'bg-slate-700/50 border-slate-600 focus:border-red-500 text-white placeholder-gray-400'
                         : 'bg-white border-gray-300 focus:border-red-500 text-black placeholder-gray-400'
@@ -208,17 +313,25 @@ export default function LoginSignup() {
                 <input
                   type="password"
                   value={password}
-                  onChange={(e) => setPassword(e.target.value)}
+                  onChange={(e) => handleFieldChange('password', e.target.value)}
                   placeholder="••••••••"
                   required
                   minLength={8}
-                  className={`w-full pl-12 pr-4 py-3 rounded-xl border-2 transition-all focus:outline-none focus:scale-105 ${
-                    darkMode
+                  disabled={isLoading}
+                  className={`w-full pl-12 pr-4 py-3 rounded-xl border-2 transition-all focus:outline-none focus:scale-105 disabled:opacity-50 disabled:cursor-not-allowed ${
+                    fieldErrors.password 
+                      ? 'border-red-500' 
+                      : darkMode
                       ? 'bg-slate-700/50 border-slate-600 focus:border-red-500 text-white placeholder-gray-400'
                       : 'bg-white border-gray-300 focus:border-red-500 text-black placeholder-gray-400'
                   }`}
                 />
               </div>
+              {fieldErrors.password && (
+                <p className={`mt-1 text-sm ${darkMode ? 'text-red-400' : 'text-red-600'}`}>
+                  {fieldErrors.password}
+                </p>
+              )}
               {!isLogin && (
                 <p className={`mt-1 text-xs ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
                   Password must be at least 8 characters
@@ -230,7 +343,7 @@ export default function LoginSignup() {
             <button
               type="submit"
               disabled={isLoading}
-              className="w-full mt-8 bg-gradient-to-r from-red-500 to-red-700 hover:from-red-600 hover:to-red-800 disabled:from-gray-400 disabled:to-gray-500 text-white py-3 rounded-xl font-bold transition-all duration-300 flex items-center justify-center gap-2 shadow-lg hover:shadow-xl transform hover:scale-105 active:scale-95"
+              className="w-full mt-8 bg-gradient-to-r from-red-500 to-red-700 hover:from-red-600 hover:to-red-800 disabled:from-gray-400 disabled:to-gray-500 text-white py-3 rounded-xl font-bold transition-all duration-300 flex items-center justify-center gap-2 shadow-lg hover:shadow-xl transform hover:scale-105 active:scale-95 disabled:cursor-not-allowed disabled:transform-none"
             >
               {isLoading ? (
                 <>
@@ -252,7 +365,8 @@ export default function LoginSignup() {
               {isLogin ? "Don't have an account? " : 'Already have an account? '}
               <button
                 onClick={toggleMode}
-                className="bg-gradient-to-r from-red-500 to-red-700 bg-clip-text text-transparent hover:from-red-600 hover:to-red-800 font-bold transition-all duration-300"
+                disabled={isLoading}
+                className="bg-gradient-to-r from-red-500 to-red-700 bg-clip-text text-transparent hover:from-red-600 hover:to-red-800 font-bold transition-all duration-300 disabled:opacity-50"
               >
                 {isLogin ? 'Sign up' : 'Sign in'}
               </button>
